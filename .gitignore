@@ -1,129 +1,169 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Oct 17 09:55:36 2022
 
-# C extensions
-*.so
+@author: Richard
+"""
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+#import packages
+import numpy as np
+import math
+from sys import exit
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+#input size of travel time matrix
+nodes = int(input('Enter the number of rows/columns in travel time matrix (tij):'))
+if nodes < 0:
+    exit()
+#input all numbers in the travel time matrix
+matrix = list(float(num) for num in input("Enter all numbers from top to bottom of travel time matrix by rows: \n").strip().split())[:]
+#check if size of travel time matrix is valid
+if len(matrix) != nodes**2:
+    exit()
+#split travel time matrix into rows
+row = [matrix[i:i+nodes] for i in range(0,len(matrix),nodes)]
+#rearrange trip distribution matrix into columns
+column = np.array(row).transpose()
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+#input future Oi and Dj
+futureOi = list(float(num) for num in input("Enter future trip Ps/Oi:").strip().split())[:nodes]
+futureDj = list(float(num) for num in input("Enter future trip As/Dj:").strip().split())[:nodes]
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
+#check if input future Oi and Dj are valid
+if len(futureOi) != nodes or len(futureDj) != nodes:
+    exit()
 
-# Translations
-*.mo
-*.pot
+#input travel cost parameter
+ob_mtl = float(input('Enter observed MTL:'))
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+hyman_iteration = 0
+mod_mtl_calc = 0
+mod_mtl = []
+beta_list = []
+#iterative calculation for travel cost parameter
+while abs(mod_mtl_calc-ob_mtl) > 0.01:
+    hyman_iteration = hyman_iteration + 1
+    fij = []
+    if hyman_iteration == 1:
+        beta = 1/ob_mtl 
+        beta_list.append(beta)
+    elif hyman_iteration == 2:
+        updated_beta_1 = mod_mtl[0]/ob_mtl*beta
+        beta_list.append(updated_beta_1)
+    else:
+        updated_beta_final = ((ob_mtl-mod_mtl[-2])*beta_list[-1]-(ob_mtl-mod_mtl[-1])*beta_list[-2])/(mod_mtl[-1]-mod_mtl[-2])
+        beta_list.append(updated_beta_final)
+    for i in range(0, nodes):
+        for j in row[i]:
+            expocalc = math.exp(-(beta_list[-1])*j)
+            fij.append(expocalc)
+    fij_row = [fij[i:i+nodes] for i in range(0,len(fij),nodes)]
+    fij_column = np.array(fij_row).transpose()
+    sumi_fij = [sum(fij_column[i]) for i in range(0,len(fij_column))]
+    #print fij in Iteration 0
+    print('\n fij matrix in Iteration 0 is: \n',np.array(fij_row))
+    #print SUMi(fij) in Iteration 0
+    print('\n SUMi(fij) for Iteration 0 is: \n',sumi_fij)
+    
+    #calculate Tij for Iteration 1
+    Tij = []
+    for i in range(0,nodes):
+        for j in fij_column[i]:
+            Tij_calc = (j/sumi_fij[i]*futureDj[i])
+            Tij.append(Tij_calc)
+    
+    Tij_column = [Tij[i:i+nodes] for i in range(0,len(Tij),nodes)]
+    
+    Tij_row = np.array(Tij_column).transpose()
+    #print Tij matrix for Iteration 1
+    print('\n Tij matrix for Iteraion 1 is: \n',Tij_row)
+    
+    #calculate list of base Oi
+    sum_Row = [sum(Tij_row[i]) for i in range(0,len(Tij_row))]
+    #print Oi* in Iteration 1
+    print('\n Oi* for Iteration 1 is: \n',sum_Row)
+    #calculate list of updated Dj
+    sum_Column = [sum(Tij_column[i]) for i in range(0,len(row))]
+    #print Dj* in Iteration 1
+    print('\n Dj* for Iteration 1 is: \n',sum_Column)
+    #calculate error for origin and destination
+    rd = []
+    ro = []
+    for i in range(0,nodes):
+        rd_calc = futureDj[i]/sum_Column[i]
+        ro_calc = futureOi[i]/sum_Row[i]
+        rd.append(rd_calc)
+        ro.append(ro_calc)
+    #check convergence
+    for i in range(0,nodes):
+        if abs(rd[i]-1) < 0.01 and abs(ro[i]-1) < 0.01:
+            convergence = True
+        else:
+            convergence = False
+    
+    iteration = 1
+    #iterative calculations of gravity model
+    while convergence == False:
+        updated_Tij = []
+        iteration = iteration + 1
+        if iteration % 2 == 0:
+            if iteration == 2:
+                updatedRow = Tij_row.tolist()
+            for i in range(0,nodes):
+                for j in updatedRow[i]:
+                    updated_calc = j*ro[i]
+                    updated_Tij.append(updated_calc)
+            updatedRow = [updated_Tij[i:i+nodes] for i in range(0,len(updated_Tij),nodes)]
+            updatedColumn = np.array(updatedRow).transpose()
+        else:
+            for i in range(0,nodes):
+                for j in updatedColumn[i]:
+                    updated_calc = j*rd[i]
+                    updated_Tij.append(updated_calc)
+            #updating a list of columns
+            updatedColumn = [updated_Tij[i:i+nodes] for i in range(0,len(updated_Tij),nodes)]
+            #updating an array of rows
+            updatedRow = np.array(updatedColumn).transpose()
+        print('\n Updated row is: \n',updatedRow)
+        print('\n Updated colum is: \n',updatedColumn)
+        #print updated Tij matrix
+        print("\n Tij matrix for Iteration",iteration,"is: \n",np.array(updatedRow))
+        #Update Oi
+        updatedOi = [sum(updatedRow[i]) for i in range(0,len(updatedRow))]
+        #Update Dj
+        updatedDj = [sum(updatedColumn[i]) for i in range(0,len(updatedColumn))]
+        #print updated Oi
+        print("\n Updated O*i for Iteration",iteration,"is: \n",updatedOi)
+        #print updated Dj
+        print("\n Updated D*j for Iteration",iteration,"is: \n",updatedDj)
+        #calculate error for origin and destination
+        ro = []
+        rd = []
+        for i in range(0,nodes):
+            rd_calc = futureDj[i]/updatedDj[i]
+            ro_calc = futureOi[i]/updatedOi[i]
+            rd.append(rd_calc)
+            ro.append(ro_calc)
+        #print R for Oi/Oi*
+        print('\n R for Oi/Oi* in Iteration',iteration,'is: \n',ro)
+        #print R for Dj/Dj*
+        print('\n R for Dj/Dj* in Iteration',iteration,'is: \n',rd)
+        #check convergence with acceptable error, comment out if a number of iteration is given
+        for i in range(0,nodes):
+            #define acceptable error
+            if abs(rd[i]-1) < 0.001 and abs(ro[i]-1) < 0.001:
+                convergence = True
+                break
+            else:
+                convergence = False
+    
+    mod_mtl_calc = sum((updated_Tij[i]*matrix[i]) for i in range(0,len(matrix)))/sum(updated_Tij)
+    mod_mtl.append(mod_mtl_calc)
+    
+    #if number of iteration desired is given, comment out if not given
+    if hyman_iteration == 2:
+        break
 
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
+#print MTL
+print('\n The final calculated MTL is',mod_mtl_calc)
+#print beta
+print('\n The final beta at iteration',hyman_iteration,'is',updated_beta_final)
